@@ -30,6 +30,7 @@ struct Token {
         token_type = t;
         value      = std::move(v);
     }
+    // is indent is lambda, we can't just do a fucking copy, a lambda object maybe very big
     Token copy() {
         switch (token_type) {
         case Tokens::DOUBLE:

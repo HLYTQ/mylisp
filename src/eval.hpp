@@ -55,7 +55,6 @@ public:
 
     std::unique_ptr<AST_base> parser(std::vector<Token>& token_list, size_t& t) {
         std::unique_ptr<AST_base> node;
-    parser_start: // quote 后跟一个indent先直接忽略这种情况，考虑设置一个特殊的标识符告诉eval不要执行quote后的部分
         switch (token_list[t].token_type) {
         case Tokens::LPAREN:
             {
@@ -112,10 +111,6 @@ public:
             return node;
         case Tokens::QUOTE:
             {
-                // TODO: 这个实现有问题，不能解决 '(a '(b c))的列表嵌套，对括号处理也有问题
-                // 要去重新构思一个递归的实现
-                // 拿emacs试了一下，'(1 2 3 '(1 2))处理结果应该是 (1 2 3 '(1 2))
-
                 // QUOTE 后面的内容不解释执行，直接挂在AST上, 作为列表或符号类型？
                 auto quoted        = std::make_unique<AST_base>();
                 node               = std::make_unique<AST_base>();
@@ -179,54 +174,78 @@ public:
                 node               = std::make_unique<AST_base>();
                 node->t.token_type = Tokens::K_LAMBDA;
 
-                // TODO: 这里也有问题，对语法错误处理有问题
                 // params
                 if (token_list[++t].token_type != Tokens::LPAREN) {
                     std::cerr << "error!: 语法错误, lambda 缺失参数列表.\n";
-                    break;
+                    return std::make_unique<AST_base>(Token{});
                 }
                 auto params = std::make_unique<List>();
-                while (token_list[++t].token_type != Tokens::RPAREN) {
+                while (token_list[++t].token_type != Tokens::RPAREN && t < token_list.size()) {
                     params->emplace_back(std::move(token_list[t]));
                 }
                 node->left = std::make_unique<AST_base>(Token{Tokens::LIST, std::move(params)});
 
-                // TODO: 要包括左右括号的读
                 // body:
                 if (token_list[++t].token_type != Tokens::LPAREN) {
                     std::cerr << "error!: 语法错误, lambda 缺失body.\n";
-                    break;
+                    return std::make_unique<AST_base>(Token{});
                 }
-                auto body       = std::make_unique<List>();
-                int paren_count = 1;
+                auto body        = std::make_unique<List>();
+                int paren_holder = this->paren_stack++; // ++ because we match a '('
                 body->emplace_back(std::move(token_list[t]));
-                while (paren_count && t < token_list.size()) {
+                while (paren_stack != paren_holder && t != token_list.size() - 1) {
                     switch (token_list[++t].token_type) {
                     case Tokens::LPAREN:
-                        paren_count++;
+                        paren_stack++;
                         body->emplace_back(std::move(token_list[t]));
                         break;
                     case Tokens::RPAREN:
-                        paren_count--;
+                        paren_stack--;
                         body->emplace_back(std::move(token_list[t]));
                         break;
                     default:
                         body->emplace_back(std::move(token_list[t]));
                     }
                 }
+                if (paren_holder != paren_stack) {
+                    NO_MATCHING_RPAREN;
+                    return std::make_unique<AST_base>(Token{});
+                } else if (t + paren_stack != token_list.size() - 1) {
+                    UNEXCEPTED_RPAREN;
+                    return std::make_unique<AST_base>(Token{});
+                }
                 node->right = std::make_unique<AST_base>(Token{Tokens::LIST, std::move(body)});
-
-                break; // last break;
+                return node;
             }
         case Tokens::IDENT:
-            node               = std::make_unique<AST_base>();
-            node->t.token_type = Tokens::IDENT;
-            node->t.value      = std::move(token_list[t].value);
-            return node;
+            {
+                node = std::make_unique<AST_base>();
+                // 前面是一个 '(' 说明是一个调用
+                if (t - 1 >= 0 && token_list[t - 1].token_type == Tokens::LPAREN) {
+                    node->t.token_type = Tokens::IDENT_C;
+                    auto params_list   = std::make_unique<List>();
+                    params_list->emplace_back(std::move(token_list[t]));
+                    Token tmp {};
+                    while (token_list[++t].token_type != Tokens::RPAREN) {
+                        if (token_list[t].token_type == Tokens::LPAREN) {
+                            auto res = parser(token_list, t);
+                            tmp = eval(res);
+                        } else {
+                            tmp = std::move(token_list[t]);
+                        }
+                        params_list->emplace_back(std::move(tmp));
+                    }
+                    node->t.value = std::move(params_list);
+                } else {
+                    node->t.token_type = Tokens::IDENT;
+                    node->t.value      = std::move(token_list[t].value);
+                }
+                return node;
+            }
         default:
             break;
         }
-        return {};
+        return std::make_unique<AST_base>(Token{});
     }
 
     Token do_plus(Token&& left, Token&& right) noexcept {
@@ -369,7 +388,32 @@ public:
         env->add(*std::get<std::unique_ptr<std::string>>(left.value), std::move(right));
         return Token{Tokens::K_DEFINE, 0};
     }
+    Token _func_call(Lambda* func, List& params, Env* outer_env) {
+        using _Ptr_Str_t = std::unique_ptr<std::string>;
+        auto local_env = std::make_unique<Env>(outer_env);
+        auto local_eval = std::make_unique<Eval>(local_env.get());
 
+        for (int i = 1; i < params.size(); ++i) {
+            local_env->add(*std::get<_Ptr_Str_t>(func->params[i - 1].value), std::move(params[i]));
+        }
+        size_t count = 0;
+        return local_eval->eval(local_eval->parser(func->body, count));
+    }
+    Token do_getident_Call(const Token& ident, Env* env) {
+        using _Ptr_List_t = std::unique_ptr<List>;
+        using _Ptr_Str_t = std::unique_ptr<std::string>;
+        auto& _params_list = *(std::get<_Ptr_List_t>(ident.value).get());
+        const auto& name = *std::get<_Ptr_Str_t>(_params_list.at(0).value);
+
+        auto tt = env->find(name);
+        if (tt != nullptr && tt->token_type == Tokens::K_LAMBDA) {
+            // std::cout << "BIG FUCK LAMBDA.\n";
+            return _func_call(std::get<std::unique_ptr<Lambda>>(tt->value).get(), _params_list, env);
+        } else {
+            std::cerr << "没有发现变量：" << name << '\n';
+            return Token{};
+        }
+    }
     Token do_getident(const std::string& name, Env* env) {
         auto tt = env->find(name);
         if (tt != nullptr) {
@@ -397,6 +441,8 @@ public:
             return std::move(node->left->t);
         case Tokens::K_DEFINE:
             return do_define(std::move(node->left->t), std::move(eval(node->right)), env);
+        case Tokens::IDENT_C:
+            return do_getident_Call(node->t, env);
         case Tokens::IDENT:
             return do_getident(*std::get<std::unique_ptr<std::string>>(node->t.value), env);
         case Tokens::K_LAMBDA:

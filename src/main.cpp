@@ -7,13 +7,14 @@
 
 #include "env.hpp"
 #include "eval.hpp"
+#include "lexical.hpp"
 #include "lisp.hpp"
 
 // vendor
 // #include "cxxopts.hpp"
 
-std::string source_code1 = "'(k m n '(h h h)";
-std::string source_code2 = "(define a_list '(a b c))";
+std::string source_code1 = "(define area (lambda (a) (* a a)))";
+std::string source_code2 = "(area (+ 1 1))";
 
 void print_info(const austlisp::Token& res, austlisp::Env* env) {
     switch (res.token_type) {
@@ -33,6 +34,15 @@ void print_info(const austlisp::Token& res, austlisp::Env* env) {
         print_info(env->last(), env);
     case austlisp::Tokens::NONE:
         break;
+    case austlisp::Tokens::K_LAMBDA:
+        std::cout << "lambda.\n";
+        break;
+    case austlisp::Tokens::IDENT_C:
+        {
+            auto pos = std::get<std::unique_ptr<austlisp::List>>(res.value).get();
+            std::cout << *std::get<std::unique_ptr<std::string>>(pos->at(0).value) << '\n';
+            break;
+        }
     default:
         std::cout << *std::get<std::unique_ptr<std::string>>(res.value) << '\n';
     }
