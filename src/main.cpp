@@ -1,4 +1,3 @@
-
 #include <cstdint>
 #include <cstdio>
 #include <iostream>
@@ -13,8 +12,7 @@
 // vendor
 // #include "cxxopts.hpp"
 
-std::string source_code1 = "(define area (lambda (a) (* a a)))";
-std::string source_code2 = "(area (+ 1 1))";
+namespace austlisp {
 
 void print_info(const austlisp::Token& res, austlisp::Env* env) {
     switch (res.token_type) {
@@ -26,17 +24,29 @@ void print_info(const austlisp::Token& res, austlisp::Env* env) {
         break;
     case austlisp::Tokens::LIST:
         for (const auto& t : *std::get<std::unique_ptr<austlisp::List>>(res.value)) {
-            std::cout << *std::get<std::unique_ptr<std::string>>(t.value) << ' ';
+            switch (t.token_type) {
+            case austlisp::Tokens::INTEGER:
+                std::cout << std::get<int64_t>(t.value) << ' ';
+                break;
+            case austlisp::Tokens::DOUBLE:
+                std::cout << std::get<double>(t.value) << ' ';
+                break;
+            default:
+                std::cout << *std::get<std::unique_ptr<std::string>>(t.value) << ' ';
+            }
         }
         std::cout << '\n';
         break;
-    case austlisp::Tokens::K_DEFINE:
-        print_info(env->last(), env);
+    case austlisp::Tokens::K_DEFINE:;
     case austlisp::Tokens::NONE:
         break;
     case austlisp::Tokens::K_LAMBDA:
         std::cout << "lambda.\n";
         break;
+    case austlisp::Tokens::_BUILDIN_CAR:
+    case austlisp::Tokens::_BUILDIN_CDR:
+    case austlisp::Tokens::_BUILDIN_EQ:
+    case austlisp::Tokens::_BUILDIN_EQUAL:
     case austlisp::Tokens::IDENT_C:
         {
             auto pos = std::get<std::unique_ptr<austlisp::List>>(res.value).get();
@@ -48,43 +58,32 @@ void print_info(const austlisp::Token& res, austlisp::Env* env) {
     }
 }
 
+void repl(Env* global_env) {
+    austlisp::Eval e(global_env);
+    size_t t = 0;
+    std::cout << "Welcome to austlisp! version 0.1\n";
+    // std::string line[] = {"(define a 1)", "(+ 1 a)", "(define b (if (true) (+ 1 2) (+ 3 4))"};
+    std::string line[] = {"(if (eq \"123\" \"kkk\") (+ 1 1) (* 2 2))", "(+ 1 1)" };
+    for (int i = 0; i < 2; ++i) {
+        std::cout << ">>> ";
+        // std::cin >> line;
+        // std::getline(std::cin, line);
+        auto tokenize = std::make_unique<austlisp::Tokenize>(line[i]);
+        // tokenize->debug_tokens();
+        auto ast = e.parser(tokenize->tokens_list, t);
+        t        = 0;
+        auto res = e.eval(ast);
+        e.clear_status();
+        print_info(res, global_env);
+    }
+}
+
+} // namespace austlisp
+
 int main(int argc, const char* argv[]) {
 
-    // cxxopts::Options options("aust lisp");
-
-    // options.add_options()
-    //     ("h,help", "print this help message and exit.");
-
-    // auto result = options.parse(argc, argv);
-
-    // if (result.count("help"))
-    // {
-    //   std::cout << options.help() << std::endl;
-    //   exit(0);
-    // }
-    // std::cout << "lisp>";
-    // std::string line;
-    // std::getline(std::cin, line);
-
     auto global_env = std::make_unique<austlisp::Env>();
+    repl(global_env.get());
 
-    austlisp::Eval e(global_env.get());
-    size_t t = 0;
-
-    auto tokenize = std::make_unique<austlisp::Tokenize>(source_code1);
-    tokenize->debug_tokens();
-    auto x = e.parser(tokenize->tokens_list, t);
-    e.clear_status();
-    auto res = e.eval(x);
-    print_info(res, global_env.get());
-
-    tokenize = std::make_unique<austlisp::Tokenize>(source_code2);
-    tokenize->debug_tokens();
-    t = 0;
-    x = e.parser(tokenize->tokens_list, t);
-    e.clear_status();
-    res = e.eval(x);
-
-    print_info(res, global_env.get());
     return 0;
 }

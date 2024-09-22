@@ -40,6 +40,7 @@ private:
     struct AST_base {
         AST_base() = default;
         AST_base(Token&& _t) : t(std::move(_t)) {}
+        virtual ~AST_base() = default; // 没有什么意义，就是为了用 dynmaic_cast
         Token t;
         std::unique_ptr<AST_base> left;
         std::unique_ptr<AST_base> right;
@@ -109,6 +110,26 @@ public:
             node->t.token_type = Tokens::STRING;
             node->t.value      = std::move(token_list[t].value);
             return node;
+        case Tokens::TRUE:
+            node               = std::make_unique<AST_base>();
+            node->t.token_type = Tokens::TRUE;
+            node->t.value      = 1;
+            return node;
+        case Tokens::FALSE:
+            node               = std::make_unique<AST_base>();
+            node->t.token_type = Tokens::TRUE;
+            node->t.value      = 0;
+            return node;
+        case Tokens::K_IF:
+            {
+                auto if_node          = std::make_unique<AST_if>();
+                if_node->t.token_type = Tokens::K_IF;
+                if_node->t.token_type = Tokens::K_IF;
+                if_node->cond         = parser(token_list, ++t);
+                if_node->left         = parser(token_list, ++t);
+                if_node->right        = parser(token_list, ++t);
+                return if_node;
+            }
         case Tokens::QUOTE:
             {
                 // QUOTE 后面的内容不解释执行，直接挂在AST上, 作为列表或符号类型？
@@ -219,26 +240,34 @@ public:
             }
         case Tokens::IDENT:
             {
-                node = std::make_unique<AST_base>();
+                using _Ptr_Str_t = std::unique_ptr<std::string>;
+                node             = std::make_unique<AST_base>();
                 // 前面是一个 '(' 说明是一个调用
                 if (t - 1 >= 0 && token_list[t - 1].token_type == Tokens::LPAREN) {
                     node->t.token_type = Tokens::IDENT_C;
                     auto params_list   = std::make_unique<List>();
                     params_list->emplace_back(std::move(token_list[t]));
-                    Token tmp {};
+                    Token tmp{};
                     while (token_list[++t].token_type != Tokens::RPAREN) {
-                        if (token_list[t].token_type == Tokens::LPAREN) {
-                            auto res = parser(token_list, t);
-                            tmp = eval(res);
-                        } else {
-                            tmp = std::move(token_list[t]);
-                        }
+                        // 这里碰到了个十分蛋疼的问题，(eq "123" "324")
+                        // 由于两次连续的make_unique，第一次出作用域就马上销毁了，
+                        // 导致第二次还在同一个位置分配了"324"，导致他们的引用地址是
+                        // 同一个，可以用推迟此处的parser, eval到真正的eval阶段来解决
+                        auto res = parser(token_list, t);
+                        tmp      = eval(res);
+
                         params_list->emplace_back(std::move(tmp));
                     }
                     node->t.value = std::move(params_list);
                 } else {
                     node->t.token_type = Tokens::IDENT;
-                    node->t.value      = std::move(token_list[t].value);
+                    // auto ident_name = *std::get<_Ptr_Str_t>(token_list[t].value);
+                    // node->t.value   = std::make_unique<std::string>(ident_name);
+                    // lambda表达式的body部分的token原来用下面的代码会被移走，我用上面👆的代码
+                    // 解决了，但是这导致一些可能不必要的复制，我又修改成了调用前复制body部分，不知道
+                    // 这么做会不会好一点，毕竟每次调用函数要复制一下body部分的内容也挺蛋疼，所以我
+                    // 还留了之前的代码
+                    node->t.value = std::move(token_list[t].value);
                 }
                 return node;
             }
@@ -390,34 +419,67 @@ public:
     }
     Token _func_call(Lambda* func, List& params, Env* outer_env) {
         using _Ptr_Str_t = std::unique_ptr<std::string>;
-        auto local_env = std::make_unique<Env>(outer_env);
-        auto local_eval = std::make_unique<Eval>(local_env.get());
+        auto local_env   = std::make_unique<Env>(outer_env);
+        auto local_eval  = std::make_unique<Eval>(local_env.get());
 
         for (int i = 1; i < params.size(); ++i) {
             local_env->add(*std::get<_Ptr_Str_t>(func->params[i - 1].value), std::move(params[i]));
         }
-        size_t count = 0;
-        return local_eval->eval(local_eval->parser(func->body, count));
+        size_t count      = 0;
+        auto _holder_body = func->body;
+        return local_eval->eval(local_eval->parser(_holder_body, count));
     }
     Token do_getident_Call(const Token& ident, Env* env) {
-        using _Ptr_List_t = std::unique_ptr<List>;
-        using _Ptr_Str_t = std::unique_ptr<std::string>;
+        using _Ptr_List_t  = std::unique_ptr<List>;
+        using _Ptr_Str_t   = std::unique_ptr<std::string>;
+        // TODO: 把求参数推迟到这里，前面就是记录参数
         auto& _params_list = *(std::get<_Ptr_List_t>(ident.value).get());
-        const auto& name = *std::get<_Ptr_Str_t>(_params_list.at(0).value);
+        const auto& name   = *std::get<_Ptr_Str_t>(_params_list.at(0).value);
 
         auto tt = env->find(name);
-        if (tt != nullptr && tt->token_type == Tokens::K_LAMBDA) {
+        if (tt != nullptr) {
             // std::cout << "BIG FUCK LAMBDA.\n";
-            return _func_call(std::get<std::unique_ptr<Lambda>>(tt->value).get(), _params_list, env);
+            switch (tt->token_type) {
+            case Tokens::K_LAMBDA:
+                {
+                    auto _lambda = std::get<std::unique_ptr<Lambda>>(tt->value).get();
+                    return _func_call(_lambda, _params_list, env);
+                }
+            case Tokens::_BUILDIN_CAR:
+                return env->_buildin_func_car(_params_list);
+            case Tokens::_BUILDIN_CDR:
+                return env->_buildin_func_cdr(_params_list);
+            case Tokens::_BUILDIN_EQ:
+                try {
+                    return env->_buildin_func_eq(_params_list);
+                } catch (std::logic_error* e) {
+                    e->what();
+                    return Token{};
+                }
+            default:
+                std::cerr << "未知的lambda:" << name << '\n';
+                return Token{};
+            }
         } else {
             std::cerr << "没有发现变量：" << name << '\n';
             return Token{};
         }
     }
+
     Token do_getident(const std::string& name, Env* env) {
         auto tt = env->find(name);
         if (tt != nullptr) {
-            return tt->copy();
+            // 复杂类型返回引用，基本类型复制
+            switch (tt->token_type) {
+            case Tokens::INTEGER:
+            case Tokens::DOUBLE:
+                return tt->copy();
+            case Tokens::LIST:
+            case Tokens::STRING:
+                return tt->reference();
+            default:
+                return tt->copy();
+            }
         } else {
             std::cerr << "没有发现变量：" << name << '\n';
             return Token{};
@@ -433,18 +495,35 @@ public:
         return Token{Tokens::K_LAMBDA, std::move(pack)};
     }
 
+    Token do_condition(AST_if* if_stmt, Env* env) {
+        auto ret = eval(if_stmt->cond);
+        if (ret.token_type == Tokens::TRUE) {
+            return eval(if_stmt->left);
+        } else {
+            return eval(if_stmt->right);
+        }
+    }
+    Token eval(AST_if* node) noexcept {
+        return do_condition(node, env);
+    }
     Token eval(const std::unique_ptr<AST_base>& node) {
         auto tt = node->t.token_type;
         // NOTE: 没有问题, 无视clangd报警即可
         switch (tt) {
         case Tokens::QUOTE:
             return std::move(node->left->t);
+        case Tokens::K_IF:
+            return eval(dynamic_cast<AST_if*>(node.get()));
         case Tokens::K_DEFINE:
             return do_define(std::move(node->left->t), std::move(eval(node->right)), env);
         case Tokens::IDENT_C:
             return do_getident_Call(node->t, env);
         case Tokens::IDENT:
             return do_getident(*std::get<std::unique_ptr<std::string>>(node->t.value), env);
+        case Tokens::TRUE:
+            return Token{Tokens::TRUE, 1};
+        case Tokens::FALSE:
+            return Token{Tokens::FALSE, 0};
         case Tokens::K_LAMBDA:
             return do_gen_lambda(node.get(), env);
         }
@@ -466,6 +545,8 @@ public:
             return do_multiple(std::move(left), std::move(right));
         case Tokens::DIVISION:
             return do_division(std::move(left), std::move(right));
+        case Tokens::STRING:
+            return node->t.reference();
         default:
             return std::move(node->t);
         }

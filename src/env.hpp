@@ -11,7 +11,9 @@ namespace austlisp {
 using std::get;
 
 struct Env {
-    Env(Env* outer = nullptr) : _outer(outer) {}
+    Env(Env* outer = nullptr) : _outer(outer) {
+        _init_buildin_function();
+    }
     ~Env() {
         _outer = nullptr;
     }
@@ -21,8 +23,13 @@ struct Env {
     const Token& operator[](const std::string& name);
     const Token& last() noexcept;
 
+    static Token _buildin_func_car(const List& token_list) noexcept;
+    static Token _buildin_func_cdr(const List& token_list);
+    static Token _buildin_func_eq(const List& token_list);
+    static Token _buildin_func_equal(const List& token_list);
+
 protected:
-    void _init_standard_env() {}
+    void _init_buildin_function();
 
 private:
     std::map<std::string, Token> sym_table;

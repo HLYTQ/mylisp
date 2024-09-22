@@ -15,14 +15,27 @@ struct Token {
     Token() : token_type(Tokens::NONE), value(0){};
     template <typename T>
     Token(Tokens t, std::enable_if_t<std::is_fundamental_v<T>, T> v) : token_type(t), value(v){};
-    Token(Token&& other) {
+    Token(Token&& other) noexcept {
         token_type = other.token_type;
         value      = std::move(other.value);
     }
-    const Token& operator=(Token&& other) {
+    Token(const Token& other) {
+        auto tt    = other.copy();
+        token_type = tt.token_type;
+        value      = std::move(tt.value);
+    }
+    const Token& operator=(Token&& other) noexcept {
         if (this != &other) {
             token_type = other.token_type;
             value      = std::move(other.value);
+        }
+        return *this;
+    }
+    const Token& operator=(const Token& other) {
+        if (this != &other) {
+            auto tt    = other.copy();
+            token_type = tt.token_type;
+            value      = std::move(tt.value);
         }
         return *this;
     }
@@ -30,8 +43,20 @@ struct Token {
         token_type = t;
         value      = std::move(v);
     }
+    /**
+     * @brief 
+     *  return true if is LIST or STRING.
+     * @return bool
+     */
+    constexpr bool is_complex_type() const noexcept {
+        return (token_type == Tokens::LIST) || (token_type == Tokens::STRING);
+    }
+    // Add this for 'eq'
+    Token reference() noexcept {
+        return Token{this->token_type, this};
+    }
     // is indent is lambda, we can't just do a fucking copy, a lambda object maybe very big
-    Token copy() {
+    Token copy() const {
         switch (token_type) {
         case Tokens::DOUBLE:
             {
@@ -47,6 +72,18 @@ struct Token {
                 tt.value      = std::get<int64_t>(value);
                 return tt;
             }
+        case Tokens::LIST:
+            {
+                Token tt;
+                tt.token_type = Tokens::LIST;
+                tt.value      = std::make_unique<List>(*std::get<std::unique_ptr<List>>(value));
+                return tt;
+            }
+        case Tokens::K_LAMBDA:
+            {
+                std::cerr << "不可复制类型Lambda.\n";
+                return Token{};
+            }
         default:
             {
                 Token tt;
@@ -56,6 +93,7 @@ struct Token {
             }
         }
     }
+
     Tokens token_type;
     Value value;
 };
@@ -165,6 +203,8 @@ public:
             if (str == "") {
                 std::cerr << "unknown character '" << source[i++] << "' ignored." << std::endl;
             } else {
+                // NOTE: 这里疑似有一个GCC的bug，在std::variant添加一个函数指针后，怎么t.value成空值了？
+                // 或者其他我自身的原因，总之更改了实现
                 value = _str_convert2value(str, t);
                 tokens_list.emplace_back(Token{t, std::move(value)});
             }
@@ -209,7 +249,9 @@ protected:
         case 'd':
             return Tokens::K_DEFINE;
         case 's':
-            return Tokens::K_SETQ;
+            if (str == "setq")
+                return Tokens::K_SETQ;
+            else return Tokens::NONE;
         case 'l':
             return Tokens::K_LAMBDA;
         case 'i':
@@ -217,7 +259,11 @@ protected:
         case 'q':
             return Tokens::K_QUOTE;
         case 'n':
-            return Tokens::NIL; // "nil" 作为一个关键字，代表null类型
+            return Tokens::NONE; // "nil" 作为一个关键字，代表null类型
+        case 't':
+            return Tokens::TRUE;
+        case 'f':
+            return Tokens::FALSE;
         default:
             return Tokens::NONE;
         }
