@@ -24,6 +24,8 @@ enum class Tokens {
     MINUS,
     STAR,
     DIVISION,
+    LOW,
+    GREAT,
     IDENT,
     IDENT_C,
     STRING,
@@ -40,6 +42,7 @@ enum class Tokens {
     _BUILDIN_EQ, // 仅仅比较两个地址
     _BUILDIN_EQUAL, // 比较内容，如果是列表，则逐个比较
     K_SETQ,
+    K_WHILE,
     K_QUOTE,
 };
 
@@ -54,6 +57,8 @@ static constexpr const char* Tokens_str[] = {
     [int(Tokens::MINUS)]          = "T_MINUS",
     [int(Tokens::STAR)]           = "T_STAR",
     [int(Tokens::DIVISION)]       = "T_DIVISION",
+    [int(Tokens::LOW)]            = "T_LOW",
+    [int(Tokens::GREAT)]          = "T_GREAT",
     [int(Tokens::IDENT)]          = "T_IDENT",
     [int(Tokens::IDENT_C)]        = "T_IDENT_C",
     [int(Tokens::STRING)]         = "T_STRING",
@@ -69,6 +74,7 @@ static constexpr const char* Tokens_str[] = {
     [int(Tokens::_BUILDIN_EQ)]    = "_BUILDIN_FUNC_EQ",
     [int(Tokens::_BUILDIN_EQUAL)] = "_BUILDIN_FUNC_EQUAL",
     [int(Tokens::K_SETQ)]         = "K_SETQ",
+    [int(Tokens::K_WHILE)]        = "K_WHILE",
     [int(Tokens::K_QUOTE)]        = "K_QUOTE",
 };
 

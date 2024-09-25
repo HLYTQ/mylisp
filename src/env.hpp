@@ -19,7 +19,7 @@ struct Env {
     }
     void add(std::string name, Token&& token);
     Token* find(const std::string& name);
-    bool update(const std::string& name, Value&& new_value);
+    bool update(const std::string& name, Tokens, Value&& new_value);
     const Token& operator[](const std::string& name);
     const Token& last() noexcept;
 

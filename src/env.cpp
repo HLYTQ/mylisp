@@ -28,13 +28,14 @@ Token* Env::find(const std::string& name) {
     return token;
 }
 
-bool Env::update(const std::string& name, Value&& new_value) {
+bool Env::update(const std::string& name, Tokens token_type, Value&& new_value) {
     Token* t = find(name);
     if (t == nullptr) {
         std::cerr << "can't find symbol: " << name << ", " << "updata failure.\n";
         return false;
     }
-    t->value = std::move(new_value);
+    t->token_type = token_type;
+    t->value      = std::move(new_value);
     return true;
 }
 
@@ -50,7 +51,7 @@ Token Env::_buildin_func_car(const List& token_list) noexcept {
         std::cerr << "error!: car接受一个列表.\n";
         return Token{};
     }
-    return (*std::get<_Ptr_List_t>(std::get<Token*>(token_list[1].value)->value))[1].copy();
+    return (*std::get<_Ptr_List_t>(token_list[1].value))[1].copy();
 }
 
 Token Env::_buildin_func_cdr(const List& token_list) {
@@ -58,9 +59,10 @@ Token Env::_buildin_func_cdr(const List& token_list) {
         std::cerr << "error!: car接受一个列表.\n";
         return Token{};
     }
-    const auto& _list = *std::get<_Ptr_List_t>(std::get<Token*>(token_list[1].value)->value);
+    const auto& _list = *std::get<_Ptr_List_t>(token_list[1].value);
     List ret;
-    for (int i = 2; i < _list.size() - 1; ++i) {
+    ret.emplace_back(_list[0]);
+    for (int i = 2; i < _list.size(); ++i) {
         ret.emplace_back(_list[i].copy());
     }
     return Token{Tokens::LIST, std::make_unique<List>(ret)};
@@ -68,7 +70,14 @@ Token Env::_buildin_func_cdr(const List& token_list) {
 
 Token Env::_buildin_func_eq(const List& token_list) {
     if (token_list[1].is_complex_type() && token_list[2].is_complex_type()) {
-        if (std::get<Token*>(token_list[1].value) == std::get<Token*>(token_list[2].value)) {
+        if (token_list[1].token_type == Tokens::STRING && token_list[2].token_type == Tokens::STRING
+            && std::get<_Ptr_Str_t>(token_list[1].value) == std::get<_Ptr_Str_t>(token_list[2].value)) {
+            return Token{Tokens::TRUE, 1};
+        } else {
+            return Token{Tokens::FALSE, 0};
+        }
+        if (token_list[1].token_type == Tokens::LIST && token_list[2].token_type == Tokens::LIST
+            && std::get<_Ptr_List_t>(token_list[1].value) == std::get<_Ptr_List_t>(token_list[2].value)) {
             return Token{Tokens::TRUE, 1};
         } else {
             return Token{Tokens::FALSE, 0};
@@ -99,6 +108,36 @@ Token Env::_buildin_func_eq(const List& token_list) {
         throw new std::logic_error("无法比较.");
     }
     return Token{Tokens::FALSE, 0};
+}
+
+Token Env::_buildin_func_equal(const List& token_list) {
+    if (token_list[1].is_complex_type() && token_list[2].is_complex_type()) {
+        if (token_list[1].token_type == Tokens::LIST && token_list[2].token_type == Tokens::LIST) {
+            auto& lhs = *std::get<_Ptr_List_t>(token_list[1].value);
+            auto& rhs = *std::get<_Ptr_List_t>(token_list[2].value);
+            if (lhs.size() != rhs.size()) {
+                return Token{Tokens::FALSE, 0};
+            }
+            for (int i = 0; i < lhs.size(); ++i) {
+                if (lhs[i] != rhs[i]) {
+                    return Token{Tokens::FALSE, 0};
+                }
+            }
+        } else if (token_list[1].token_type == Tokens::STRING && token_list[2].token_type == Tokens::STRING) {
+            auto& lhs = *std::get<_Ptr_Str_t>(token_list[1].value);
+            auto& rhs = *std::get<_Ptr_Str_t>(token_list[2].value);
+            if (lhs.size() != rhs.size()) {
+                return Token{Tokens::FALSE, 0};
+            }
+            for (int i = 0; i < lhs.size(); ++i) {
+                if (lhs[i] != rhs[i]) {
+                    return Token{Tokens::FALSE, 0};
+                }
+            }
+        }
+        return Token{Tokens::TRUE, 1};
+    }
+    return _buildin_func_eq(token_list);
 }
 
 void Env::_init_buildin_function() {

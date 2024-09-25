@@ -55,6 +55,9 @@ public:
     }
 
     std::unique_ptr<AST_base> parser(std::vector<Token>& token_list, size_t& t) {
+        if (token_list.empty()) 
+            return std::make_unique<AST_base>();
+
         std::unique_ptr<AST_base> node;
         switch (token_list[t].token_type) {
         case Tokens::LPAREN:
@@ -124,11 +127,18 @@ public:
             {
                 auto if_node          = std::make_unique<AST_if>();
                 if_node->t.token_type = Tokens::K_IF;
-                if_node->t.token_type = Tokens::K_IF;
                 if_node->cond         = parser(token_list, ++t);
                 if_node->left         = parser(token_list, ++t);
                 if_node->right        = parser(token_list, ++t);
                 return if_node;
+            }
+        case Tokens::K_WHILE:
+            {
+                auto loop_node = std::make_unique<AST_base>();
+                loop_node->t.token_type = Tokens::K_WHILE;
+                loop_node->left = parser(token_list, ++t);
+                loop_node->right = parser(token_list, ++t);
+                return loop_node;
             }
         case Tokens::QUOTE:
             {
@@ -143,11 +153,11 @@ public:
                 for (;;) {
                     switch (token_list[++t].token_type) {
                     case Tokens::LPAREN:
-                        this->paren_stack++;
+                        paren_holder++;
                         list->emplace_back(std::move(token_list[t]));
                         break;
                     case Tokens::RPAREN:
-                        this->paren_stack--;
+                        paren_holder--;
                         list->emplace_back(std::move(token_list[t]));
                         break;
                     default:
@@ -160,10 +170,11 @@ public:
                 if (paren_holder != paren_stack) {
                     NO_MATCHING_RPAREN;
                     return std::make_unique<AST_base>(Token{});
-                } else if (t + paren_stack != token_list.size() - 1) {
-                    UNEXCEPTED_RPAREN;
-                    return std::make_unique<AST_base>(Token{});
                 }
+                // else if (t + paren_holder != token_list.size() - 1) {
+                //     UNEXCEPTED_RPAREN;
+                //     return std::make_unique<AST_base>(Token{});
+                // }
 
                 quoted->t.value = std::move(list);
                 node->left      = std::move(quoted);
@@ -181,6 +192,23 @@ public:
                 node->right = parser(token_list, ++t);
                 if (node->right->t.token_type == Tokens::NONE) {
                     std::cerr << "error!: define需要一个赋给变量的值.\n";
+                    return std::make_unique<AST_base>(Token{});
+                }
+                paren_handler();
+                break;
+            }
+        case Tokens::K_SETQ:
+            {
+                node               = std::make_unique<AST_base>();
+                node->t.token_type = Tokens::K_SETQ;
+                if (token_list[++t].token_type != Tokens::IDENT) {
+                    std::cerr << "error!: setq后必须跟一个符号名称.\n";
+                    return std::make_unique<AST_base>(Token{});
+                }
+                node->left  = std::make_unique<AST_base>(std::move(token_list[t]));
+                node->right = parser(token_list, ++t);
+                if (node->right->t.token_type == Tokens::NONE) {
+                    std::cerr << "error!: setq需要一个赋给变量的值.\n";
                     return std::make_unique<AST_base>(Token{});
                 }
                 paren_handler();
@@ -246,28 +274,31 @@ public:
                 if (t - 1 >= 0 && token_list[t - 1].token_type == Tokens::LPAREN) {
                     node->t.token_type = Tokens::IDENT_C;
                     auto params_list   = std::make_unique<List>();
-                    params_list->emplace_back(std::move(token_list[t]));
+                    params_list->emplace_back(token_list[t].copy());
                     Token tmp{};
-                    while (token_list[++t].token_type != Tokens::RPAREN) {
-                        // 这里碰到了个十分蛋疼的问题，(eq "123" "324")
-                        // 由于两次连续的make_unique，第一次出作用域就马上销毁了，
-                        // 导致第二次还在同一个位置分配了"324"，导致他们的引用地址是
-                        // 同一个，可以用推迟此处的parser, eval到真正的eval阶段来解决
-                        auto res = parser(token_list, t);
-                        tmp      = eval(res);
-
-                        params_list->emplace_back(std::move(tmp));
-                    }
+                    int paren_holder = this->paren_stack;
+                    // auto res = parser(token_list, t);
+                    // tmp      = eval(res);
+                    // (area 2 '(2 2))
+                    do {
+                        switch (token_list[++t].token_type) {
+                        case Tokens::LPAREN:
+                            paren_holder++;
+                            break;
+                        case Tokens::RPAREN:
+                            paren_holder--;
+                            break;
+                        }
+                        params_list->emplace_back(token_list[t]);
+                    } while (!(token_list[t].token_type == Tokens::RPAREN && paren_holder == paren_stack - 1));
                     node->t.value = std::move(params_list);
                 } else {
                     node->t.token_type = Tokens::IDENT;
-                    // auto ident_name = *std::get<_Ptr_Str_t>(token_list[t].value);
-                    // node->t.value   = std::make_unique<std::string>(ident_name);
+                    auto ident_name = *std::get<_Ptr_Str_t>(token_list[t].value);
+                    node->t.value   = std::make_unique<std::string>(ident_name);
                     // lambda表达式的body部分的token原来用下面的代码会被移走，我用上面👆的代码
-                    // 解决了，但是这导致一些可能不必要的复制，我又修改成了调用前复制body部分，不知道
-                    // 这么做会不会好一点，毕竟每次调用函数要复制一下body部分的内容也挺蛋疼，所以我
-                    // 还留了之前的代码
-                    node->t.value = std::move(token_list[t].value);
+                    // 解决了，去tmd的，不在乎这一点性能
+                    // node->t.value = std::move(token_list[t].value);
                 }
                 return node;
             }
@@ -412,10 +443,23 @@ public:
         }
         return ret;
     }
-
     Token do_define(Token&& left, Token&& right, Env* env) {
         env->add(*std::get<std::unique_ptr<std::string>>(left.value), std::move(right));
         return Token{Tokens::K_DEFINE, 0};
+    }
+    Token do_while(AST_base* loop_node, Env* env) {
+        auto cond = eval(loop_node->left);
+        cond = eval(loop_node->left);
+        Token ret{};
+        while (cond.token_type != Tokens::FALSE) {
+            ret = eval(loop_node->right);
+            cond = eval(loop_node->left);
+        }
+        return ret;
+    }
+    Token do_setq(Token&& left, Token&& right, Env* env) {
+        env->update(*std::get<_Ptr_Str_t>(left.value), right.token_type, std::move(right.value));
+        return Token{};
     }
     Token _func_call(Lambda* func, List& params, Env* outer_env) {
         using _Ptr_Str_t = std::unique_ptr<std::string>;
@@ -430,11 +474,28 @@ public:
         return local_eval->eval(local_eval->parser(_holder_body, count));
     }
     Token do_getident_Call(const Token& ident, Env* env) {
-        using _Ptr_List_t  = std::unique_ptr<List>;
-        using _Ptr_Str_t   = std::unique_ptr<std::string>;
-        // TODO: 把求参数推迟到这里，前面就是记录参数
-        auto& _params_list = *(std::get<_Ptr_List_t>(ident.value).get());
-        const auto& name   = *std::get<_Ptr_Str_t>(_params_list.at(0).value);
+        using _Ptr_List_t = std::unique_ptr<List>;
+        using _Ptr_Str_t  = std::unique_ptr<std::string>;
+        std::unique_ptr<AST_base> res;
+        // DONE: 把求参数推迟到这里，前面就是记录参数
+        auto& contain    = *std::get<_Ptr_List_t>(ident.value);
+        const auto& name = *std::get<_Ptr_Str_t>(contain.at(0).value);
+
+        size_t count = 0; // ignore indent name
+        List _params_list{};
+        _params_list.emplace_back(contain.at(0));
+        while (contain[++count].token_type != Tokens::RPAREN) {
+            // 我不得不放弃之前使用引用的想法，除非我再添加一个字符串字面量的类型，但我不想再在为
+            // 这个项目花更多的时间了。一个没有注册到sym_table中的字面量在用了智能指针管理内存的情况下
+            // 其挂在AST上的Token会在出当前作用域就被释放掉，这将引发很多问题，包括让我之前在eq，equal函数上的
+            // 工作白费了，所以Token的reference函数目前只对define过的变量有效果，实际上在当前代码下弃用了
+            // 除非我在花精力搞字符串字面量的token_type。
+            // 也怪我没有做好前期的设计😡，C++写一个解释器比我预想的要麻烦很多。
+            // Anyway, 就这样吧。
+            auto res  = parser(contain, count);
+            Token tmp = eval(res);
+            _params_list.emplace_back(std::move(tmp));
+        }
 
         auto tt = env->find(name);
         if (tt != nullptr) {
@@ -452,6 +513,13 @@ public:
             case Tokens::_BUILDIN_EQ:
                 try {
                     return env->_buildin_func_eq(_params_list);
+                } catch (std::logic_error* e) {
+                    e->what();
+                    return Token{};
+                }
+            case Tokens::_BUILDIN_EQUAL:
+                try {
+                    return env->_buildin_func_equal(_params_list);
                 } catch (std::logic_error* e) {
                     e->what();
                     return Token{};
@@ -476,7 +544,7 @@ public:
                 return tt->copy();
             case Tokens::LIST:
             case Tokens::STRING:
-                return tt->reference();
+                return tt->copy();
             default:
                 return tt->copy();
             }
@@ -514,8 +582,12 @@ public:
             return std::move(node->left->t);
         case Tokens::K_IF:
             return eval(dynamic_cast<AST_if*>(node.get()));
+        case Tokens::K_WHILE:
+            return do_while(node.get(), env);
         case Tokens::K_DEFINE:
             return do_define(std::move(node->left->t), std::move(eval(node->right)), env);
+        case Tokens::K_SETQ:
+            return do_setq(std::move(node->left->t), std::move(eval(node->right)), env);
         case Tokens::IDENT_C:
             return do_getident_Call(node->t, env);
         case Tokens::IDENT:
@@ -545,8 +617,8 @@ public:
             return do_multiple(std::move(left), std::move(right));
         case Tokens::DIVISION:
             return do_division(std::move(left), std::move(right));
-        case Tokens::STRING:
-            return node->t.reference();
+        // case Tokens::STRING:
+        //     return node->t.reference();
         default:
             return std::move(node->t);
         }

@@ -1,4 +1,6 @@
 #pragma once
+#include <cctype>
+#include <cstdint>
 #ifndef _LEXICAL_HPP_
 #define _LEXICAL_HPP_
 
@@ -43,6 +45,17 @@ struct Token {
         token_type = t;
         value      = std::move(v);
     }
+    constexpr bool operator==(const Token& other) {
+        if (this->token_type == other.token_type && this->value == other.value) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+    constexpr bool operator!=(const Token& other) {
+        return !(*this == other);
+    }
+
     /**
      * @brief 
      *  return true if is LIST or STRING.
@@ -53,7 +66,7 @@ struct Token {
     }
     // Add this for 'eq'
     Token reference() noexcept {
-        return Token{this->token_type, this};
+        return Token{this->token_type, (int64_t)(this) };
     }
     // is indent is lambda, we can't just do a fucking copy, a lambda object maybe very big
     Token copy() const {
@@ -102,7 +115,7 @@ struct Tokenize {
 public:
     Tokenize(std::string_view source) {
         size_t i = 0;
-        while (std::isspace(source[i])) {
+        while (std::isspace(source[i]) || !std::isprint(source[i])) {
             i++;
         }
         while (i < source.size() && source[i] != '\n') {
@@ -249,21 +262,46 @@ protected:
         case 'd':
             return Tokens::K_DEFINE;
         case 's':
-            if (str == "setq")
+            if (str == "setq") {
                 return Tokens::K_SETQ;
-            else return Tokens::NONE;
+            } else {
+                return Tokens::NONE;
+            }
         case 'l':
-            return Tokens::K_LAMBDA;
+            if (str == "lambda") {
+                return Tokens::K_LAMBDA;
+            } else {
+                return Tokens::NONE;
+            }
         case 'i':
-            return Tokens::K_IF;
+            if (str == "if") {
+                return Tokens::K_IF;
+            } else {
+                return Tokens::NONE;
+            }
         case 'q':
-            return Tokens::K_QUOTE;
+            if (str == "lambda") {
+                return Tokens::K_QUOTE;
+            } else {
+                return Tokens::NONE;
+            }
         case 'n':
+            if (str == "nil") {
+                return Tokens::NONE;
+            }
             return Tokens::NONE; // "nil" 作为一个关键字，代表null类型
         case 't':
-            return Tokens::TRUE;
+            if (str == "true")
+                return Tokens::TRUE;
+            return Tokens::NONE;
         case 'f':
-            return Tokens::FALSE;
+            if (str == "false")
+                return Tokens::FALSE;
+            return Tokens::NONE;
+        case 'w':
+            if (str == "while")
+                return Tokens::K_WHILE;
+            return Tokens::NONE;
         default:
             return Tokens::NONE;
         }
@@ -276,6 +314,7 @@ private:
         "lambda",
         "if",
         "quote",
+        "while",
         "nil",
     };
 
