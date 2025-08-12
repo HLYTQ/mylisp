@@ -1,21 +1,20 @@
 # Lisp
 
-## grammar
+## 依赖
 
-参考emacs lisp语法
+1. GCC编译器，至少需要支持C++17，MSVC需要在visual studio installer下载跨平台套件，并且删除Token_str数组和引用到它的debug_token函数
 
-解析为一个个cell
+2. CMake，一个C++构建工具
 
-STL的string太大了，手搓一个小一点的[x]
-* 不用了，实现了正确的unique_ptr + std::string方案
+## 编译
 
-## lisp
+项目工程路径中不能含有中文名称
 
+根目录下执行：
 
-## env
-
-存储变量等，实现func的时候也要用
-
-## eval
-
-具体执行语句的部分
+```bash
+mkdir build
+cd build
+cmake ..
+make
+```
