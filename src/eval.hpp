@@ -514,14 +514,14 @@ public:
                 try {
                     return env->_buildin_func_eq(_params_list);
                 } catch (std::logic_error* e) {
-                    e->what();
+                    std::cerr << e->what() << std::endl;;
                     return Token{};
                 }
             case Tokens::_BUILDIN_EQUAL:
                 try {
                     return env->_buildin_func_equal(_params_list);
                 } catch (std::logic_error* e) {
-                    e->what();
+                    std::cerr << e->what() << std::endl;
                     return Token{};
                 }
             default:

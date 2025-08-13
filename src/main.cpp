@@ -87,7 +87,7 @@ void file_mode(Env* global_env, const cxxopts::ParseResult& result) {
             std::cout << "no file: " << result["file"].as<std::string>() << '\n';
         }
     } catch (std::exception* e) {
-        e->what();
+        std::cerr << e->what() << std::endl;
         exit(1);
     }
     std::string line;
